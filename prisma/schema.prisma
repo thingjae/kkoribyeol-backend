@@ -1,0 +1,151 @@
+// 꼬리별 반려동물 호텔 — hw2 스키마
+// 설계 근거는 hw2/설계.md 참고
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // DB 주소는 prisma.config.ts가 .env에서 읽는다 (...?schema=hw2)
+  provider = "postgresql"
+}
+
+/// 보호자 = 코어 웹 고객 계정
+/// 모든 보호자가 코어 웹에서 직접 가입하므로 사람 정보와 계정을 한 테이블에 둔다
+model Guardian {
+  id             Int           @id @default(autoincrement())
+  email          String        @unique
+  passwordHash   String        @map("password_hash")
+  name           String
+  phone          String
+  emergencyPhone String        @map("emergency_phone")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  pets           Pet[]
+  reservations   Reservation[]
+
+  @@map("guardian")
+}
+
+enum StaffRole {
+  ADMIN
+  STAFF
+}
+
+/// 직원 = 어드민 계정. 가입이 없고 관리자가 만든다
+model Staff {
+  id                 Int       @id @default(autoincrement())
+  email              String    @unique
+  passwordHash       String    @map("password_hash")
+  name               String
+  role               StaffRole @default(STAFF)
+  isActive           Boolean   @default(true) @map("is_active")
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  @@map("staff")
+}
+
+/// 보호자 1 : N 반려동물
+model Pet {
+  id           Int              @id @default(autoincrement())
+  guardianId   Int              @map("guardian_id")
+  guardian     Guardian         @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+  name         String
+  species      String
+  birthDate    DateTime         @map("birth_date") @db.Date
+  weightKg     Decimal          @map("weight_kg") @db.Decimal(4, 1)
+  vaccinatedAt DateTime         @map("vaccinated_at") @db.Date
+  rabiesAt     DateTime         @map("rabies_at") @db.Date
+  food         String
+  allergy      String           @default("")
+  reservations ReservationPet[]
+
+  @@index([guardianId])
+  @@map("pet")
+}
+
+/// 객실 종류. 요금과 몸무게 기준은 종류마다 하나뿐이라 방에서 떼어 둔다
+model RoomType {
+  id           Int      @id @default(autoincrement())
+  name         String   @unique
+  minWeight    Decimal  @map("min_weight") @db.Decimal(4, 1)
+  maxWeight    Decimal? @map("max_weight") @db.Decimal(4, 1) // 대형은 상한 없음
+  weekdayPrice Int      @map("weekday_price")
+  weekendPrice Int      @map("weekend_price")
+  rooms        Room[]
+
+  @@map("room_type")
+}
+
+model Room {
+  id           Int           @id @default(autoincrement())
+  roomTypeId   Int           @map("room_type_id")
+  roomType     RoomType      @relation(fields: [roomTypeId], references: [id])
+  roomNumber   String        @unique @map("room_number")
+  reservations Reservation[]
+
+  @@map("room")
+}
+
+model Service {
+  id           Int                  @id @default(autoincrement())
+  name         String               @unique
+  price        Int
+  isActive     Boolean              @default(true) @map("is_active")
+  reservations ReservationService[]
+
+  @@map("service")
+}
+
+enum ReservationStatus {
+  RESERVED
+  CHECKED_IN
+  CHECKED_OUT
+  CANCELED
+}
+
+model Reservation {
+  id           Int                  @id @default(autoincrement())
+  guardianId   Int                  @map("guardian_id")
+  guardian     Guardian             @relation(fields: [guardianId], references: [id])
+  roomId       Int                  @map("room_id")
+  room         Room                 @relation(fields: [roomId], references: [id])
+  checkInDate  DateTime             @map("check_in_date") @db.Date
+  checkOutDate DateTime             @map("check_out_date") @db.Date
+  status       ReservationStatus    @default(RESERVED)
+  checkedInAt  DateTime?            @map("checked_in_at")
+  checkedOutAt DateTime?            @map("checked_out_at")
+  canceledAt   DateTime?            @map("canceled_at")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  pets         ReservationPet[]
+  services     ReservationService[]
+
+  @@index([checkInDate])
+  @@index([checkOutDate])
+  @@index([guardianId])
+  @@map("reservation")
+}
+
+/// 한 예약에 아이가 둘까지 들어갈 수 있어서 뗀 테이블 (N:M)
+/// 같은 아이를 두 번 넣는 것은 복합 기본 키가 막는다. "둘까지"는 세어 봐야 해서 백엔드가 막는다
+model ReservationPet {
+  reservationId Int         @map("reservation_id")
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  petId         Int         @map("pet_id")
+  pet           Pet         @relation(fields: [petId], references: [id])
+
+  @@id([reservationId, petId])
+  @@map("reservation_pet")
+}
+
+model ReservationService {
+  id            Int         @id @default(autoincrement())
+  reservationId Int         @map("reservation_id")
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  serviceId     Int         @map("service_id")
+  service       Service     @relation(fields: [serviceId], references: [id])
+  count         Int
+
+  @@unique([reservationId, serviceId])
+  @@map("reservation_service")
+}
